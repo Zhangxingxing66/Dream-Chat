@@ -1,0 +1,22 @@
+# 忽略 亮点 文件夹
+亮点/
+
+# 依赖
+node_modules/
+
+# 构建产物
+dist/
+build/
+
+# 环境变量
+.env
+.env.local
+.env.production
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 日志
+npm-debug.log
+yarn-debug.log
