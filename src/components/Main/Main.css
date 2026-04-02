@@ -538,3 +538,204 @@
   animation: colorful-sound-wave-animation 1s infinite alternate;
 }
 
+/* ── FSM 状态指示器 ─────────────────────────────────────────────────────── */
+.fsm-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 50px;
+  margin-bottom: 8px;
+  font-weight: 500;
+}
+
+.fsm-thinking {
+  background: rgba(168, 218, 220, 0.15);
+  border: 1px solid rgba(168, 218, 220, 0.4);
+  color: #5ba4a7;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.fsm-tool {
+  background: rgba(255, 217, 125, 0.18);
+  border: 1px solid rgba(255, 217, 125, 0.5);
+  color: #b8860b;
+  animation: pulse 1s ease-in-out infinite;
+}
+
+.fsm-answering {
+  background: rgba(168, 218, 220, 0.1);
+  border: 1px solid rgba(168, 218, 220, 0.3);
+  color: #5ba4a7;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.5; }
+}
+
+/* ── 工具调用卡片列表 ────────────────────────────────────────────────────── */
+.tool-calls-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.tool-card {
+  background: rgba(255, 245, 210, 0.5);
+  border: 1px solid rgba(255, 217, 125, 0.45);
+  border-radius: 12px;
+  overflow: hidden;
+  font-size: 13px;
+}
+
+.tool-card-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  transition: background 0.2s;
+}
+
+.tool-card-summary::-webkit-details-marker { display: none; }
+
+.tool-card-summary:hover {
+  background: rgba(255, 245, 210, 0.85);
+}
+
+.tool-icon { font-size: 15px; }
+
+.tool-name {
+  font-weight: 600;
+  color: #8a6a00;
+}
+
+.tool-args-preview {
+  flex: 1;
+  color: #a08040;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-done {
+  color: #5ba4a7;
+  font-weight: 700;
+}
+
+.tool-running {
+  color: #f4a3b4;
+  animation: pulse 0.8s ease-in-out infinite;
+}
+
+.tool-card-body {
+  padding: 8px 12px 10px;
+  border-top: 1px solid rgba(255, 217, 125, 0.3);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tool-input,
+.tool-output {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tool-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: #a08040;
+  letter-spacing: 0.05em;
+}
+
+.tool-card-body code {
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(255, 217, 125, 0.3);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-family: 'Courier New', monospace;
+  color: #5d6d7e;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.tool-error {
+  color: #e07a8a;
+  font-style: italic;
+}
+
+/* ── 天气结果 ───────────────────────────────────────────────────────────── */
+.weather-result {
+  background: rgba(255, 255, 255, 0.7);
+  border-radius: 10px;
+  padding: 10px 14px;
+  border: 1px solid rgba(168, 218, 220, 0.3);
+}
+
+.weather-temp {
+  font-size: 26px;
+  font-weight: 700;
+  color: #5ba4a7;
+}
+
+.weather-desc {
+  font-size: 14px;
+  color: #5d6d7e;
+  margin: 2px 0 6px;
+}
+
+.weather-meta {
+  display: flex;
+  gap: 12px;
+  font-size: 12px;
+  color: #7f8c8d;
+}
+
+/* ── 搜索结果 ───────────────────────────────────────────────────────────── */
+.search-results {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.search-results li {
+  background: rgba(255, 255, 255, 0.7);
+  border-radius: 8px;
+  padding: 6px 10px;
+  border: 1px solid rgba(168, 218, 220, 0.25);
+}
+
+.search-results a {
+  font-weight: 600;
+  color: #5ba4a7;
+  text-decoration: none;
+  font-size: 13px;
+}
+
+.search-results a:hover { color: #f4a3b4; }
+
+.search-results p {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: #7f8c8d;
+  line-height: 1.4;
+}
+
+.no-results {
+  font-style: italic;
+  color: #aab7b8;
+  font-size: 12px;
+}
+
