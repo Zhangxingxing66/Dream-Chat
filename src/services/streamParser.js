@@ -152,15 +152,21 @@ class StreamParser {
 
   startFlush() {
     this.isFlushing = true;
-    this.flushInterval = setInterval(() => {
-      this.flushChunk();
-    }, 50);
+    const scheduleFlush = () => {
+      if (this.renderBuffer.length > 0) {
+        this.flushChunk();
+      }
+      if (this.isFlushing) {
+        this.flushInterval = requestAnimationFrame(scheduleFlush);
+      }
+    };
+    this.flushInterval = requestAnimationFrame(scheduleFlush);
   }
 
   stopFlush() {
     this.isFlushing = false;
     if (this.flushInterval) {
-      clearInterval(this.flushInterval);
+      cancelAnimationFrame(this.flushInterval);
       this.flushInterval = null;
     }
   }

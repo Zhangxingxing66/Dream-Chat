@@ -9,8 +9,24 @@ export const Context = createContext();
 const ContextProvider = (props) => {
   const [input, setInput] = useState("");
   const [recentPrompt, setRecentPrompt] = useState('');
-  const [sessions, setSessions] = useState([]);
-  const [currentSessionId, setCurrentSessionId] = useState(null);
+  // 懒初始化：首次渲染从 localStorage 恢复会话列表
+  const [sessions, setSessions] = useState(() => {
+    try {
+      const saved = localStorage.getItem('dream-chat-sessions');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [currentSessionId, setCurrentSessionId] = useState(() => {
+    try {
+      return localStorage.getItem('dream-chat-current-session-id')
+        ? Number(localStorage.getItem('dream-chat-current-session-id'))
+        : null;
+    } catch {
+      return null;
+    }
+  });
   const [showResult, setShowResult] = useState(false);
   const [loading, setLoading] = useState(false);
   const [resultData, setResultData] = useState('');
@@ -94,8 +110,41 @@ const ContextProvider = (props) => {
   useEffect(() => {
     if (sessions.length === 0) {
       createNewSession();
+    } else if (currentSessionId) {
+      // 刷新后恢复上次打开的会话
+      const session = sessions.find(s => s.id === currentSessionId);
+      if (session) {
+        setMessages(session.messages);
+        setShowResult(session.messages.length > 0);
+        setResultData(session.resultData || '');
+        setInput(session.input || '');
+      }
     }
-  }, [sessions.length, createNewSession]);
+  }, []); // 仅首次挂载执行
+
+  // sessions 变化时持久化到 localStorage
+  // 生成中的消息状态重置为 completed，防止刷新后永远卡在 generating
+  useEffect(() => {
+    try {
+      const toSave = sessions.map(session => ({
+        ...session,
+        isGenerating: false,
+        messages: session.messages.map(msg =>
+          msg.status === 'generating' ? { ...msg, status: 'completed' } : msg
+        )
+      }));
+      localStorage.setItem('dream-chat-sessions', JSON.stringify(toSave));
+    } catch (e) {
+      console.warn('localStorage 写入失败（可能已满）:', e);
+    }
+  }, [sessions]);
+
+  // currentSessionId 变化时持久化
+  useEffect(() => {
+    if (currentSessionId !== null) {
+      localStorage.setItem('dream-chat-current-session-id', String(currentSessionId));
+    }
+  }, [currentSessionId]);
 
   const scrollToBottom = useCallback(() => {
     if (chatContainerRef.current && !isUserScrollingRef.current) {
