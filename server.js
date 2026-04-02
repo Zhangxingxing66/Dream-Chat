@@ -5,6 +5,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
+const TAVILY_API_KEY = process.env.TAVILY_API_KEY;
 const PORT = process.env.PORT || 3001;
 
 // 免费天气 API（wttr.in，无需 key）
@@ -195,84 +196,62 @@ function handleWeatherRequest(city, unit, res) {
   wttrReq.end();
 }
 
-// ── /api/search 处理（DuckDuckGo Instant Answer API，免费无需 key）──────────
+// ── /api/search 处理（Tavily Search API）────────────────────────────────────
 
 function handleSearchRequest(query, count, res) {
-  const encodedQuery = encodeURIComponent(query);
-  const path = `/?q=${encodedQuery}&format=json&no_html=1&skip_disambig=1`;
+  const body = JSON.stringify({
+    query,
+    max_results: Math.min(count || 5, 10),
+    search_depth: 'basic',
+    include_answer: true,
+    include_raw_content: false
+  });
 
   const options = {
-    hostname: 'api.duckduckgo.com',
+    hostname: 'api.tavily.com',
     port: 443,
-    path,
-    method: 'GET',
-    timeout: 10000,
-    headers: { 'User-Agent': 'dreamAI-search/1.0' }
+    path: '/search',
+    method: 'POST',
+    timeout: 15000,
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${TAVILY_API_KEY}`
+    }
   };
 
-  const ddgReq = https.request(options, (ddgRes) => {
+  const tavilyReq = https.request(options, (tavilyRes) => {
     let data = '';
-    ddgRes.on('data', (chunk) => { data += chunk; });
-    ddgRes.on('end', () => {
+    tavilyRes.on('data', (chunk) => { data += chunk; });
+    tavilyRes.on('end', () => {
       try {
         const json = JSON.parse(data);
 
-        const results = [];
-
-        // Abstract（摘要，如维基百科）
-        if (json.AbstractText) {
-          results.push({
-            title: json.Heading || query,
-            snippet: json.AbstractText,
-            url: json.AbstractURL || '',
-            source: json.AbstractSource || 'DuckDuckGo'
-          });
+        if (json.detail || json.error) {
+          return sendJSON(res, { error: json.detail || json.error });
         }
 
-        // RelatedTopics
-        for (const topic of json.RelatedTopics || []) {
-          if (results.length >= count) break;
-          if (topic.Text && topic.FirstURL) {
-            results.push({
-              title: topic.Text.split(' - ')[0] || topic.Text.slice(0, 60),
-              snippet: topic.Text,
-              url: topic.FirstURL,
-              source: 'DuckDuckGo'
-            });
-          }
-          // Topics 里有嵌套的 Topics
-          if (topic.Topics) {
-            for (const sub of topic.Topics) {
-              if (results.length >= count) break;
-              if (sub.Text && sub.FirstURL) {
-                results.push({
-                  title: sub.Text.slice(0, 60),
-                  snippet: sub.Text,
-                  url: sub.FirstURL,
-                  source: 'DuckDuckGo'
-                });
-              }
-            }
-          }
-        }
+        const results = (json.results || []).map(r => ({
+          title: r.title,
+          snippet: r.content,
+          url: r.url,
+          score: r.score,
+          source: new URL(r.url).hostname
+        }));
 
-        if (results.length === 0) {
-          sendJSON(res, {
-            query,
-            results: [],
-            note: '未找到相关结果，建议换一个关键词或直接访问搜索引擎'
-          });
-        } else {
-          sendJSON(res, { query, results: results.slice(0, count) });
-        }
+        sendJSON(res, {
+          query,
+          answer: json.answer || null,
+          results
+        });
       } catch (e) {
         sendJSON(res, { error: '搜索结果解析失败', detail: e.message });
       }
     });
   });
 
-  ddgReq.on('error', (e) => sendJSON(res, { error: `搜索失败: ${e.message}` }));
-  ddgReq.end();
+  tavilyReq.on('error', (e) => sendJSON(res, { error: `搜索失败: ${e.message}` }));
+  tavilyReq.write(body);
+  tavilyReq.end();
 }
 
 server.listen(PORT, () => {

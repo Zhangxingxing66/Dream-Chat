@@ -739,3 +739,20 @@
   font-size: 12px;
 }
 
+.search-answer {
+  font-size: 13px;
+  color: #2c3e50;
+  background: rgba(168, 218, 220, 0.12);
+  border-left: 3px solid #a8dadc;
+  border-radius: 0 8px 8px 0;
+  padding: 6px 10px;
+  margin-bottom: 8px;
+  line-height: 1.5;
+}
+
+.search-source {
+  font-size: 11px;
+  color: #aab7b8;
+  margin-left: 6px;
+}
+

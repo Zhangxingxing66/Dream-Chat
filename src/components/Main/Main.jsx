@@ -83,17 +83,23 @@ const ToolResultView = ({ name, result }) => {
 
   if (name === 'web_search') {
     return (
-      <ul className="search-results">
-        {(result.results || []).slice(0, 3).map((r, i) => (
-          <li key={i}>
-            <a href={r.url} target="_blank" rel="noreferrer">{r.title}</a>
-            <p>{r.snippet?.slice(0, 100)}…</p>
-          </li>
-        ))}
-        {(!result.results || result.results.length === 0) && (
-          <li className="no-results">{result.note || '无结果'}</li>
+      <div className="search-results-wrap">
+        {result.answer && (
+          <div className="search-answer">{result.answer}</div>
         )}
-      </ul>
+        <ul className="search-results">
+          {(result.results || []).slice(0, 3).map((r, i) => (
+            <li key={i}>
+              <a href={r.url} target="_blank" rel="noreferrer">{r.title}</a>
+              <span className="search-source">{r.source}</span>
+              <p>{r.snippet?.slice(0, 120)}…</p>
+            </li>
+          ))}
+          {(!result.results || result.results.length === 0) && (
+            <li className="no-results">{result.note || '无结果'}</li>
+          )}
+        </ul>
+      </div>
     );
   }
 
