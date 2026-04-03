@@ -6,13 +6,105 @@ import { executeToolCalls } from "../services/toolExecutor";
 
 export const Context = createContext();
 
+const MAX_IMAGE_FILE_SIZE = 10 * 1024 * 1024;
+const MAX_IMAGE_DIMENSION = 1280;
+const COMPRESSED_IMAGE_QUALITY = 0.82;
+
+const getMessageText = (message) => (typeof message?.content === "string" ? message.content.trim() : "");
+
+const getMessageTitle = (message) => {
+  const text = getMessageText(message);
+  if (text) return text.slice(0, 20);
+
+  const firstAttachment = message?.attachments?.[0];
+  if (firstAttachment?.name) {
+    return `[图片] ${firstAttachment.name}`.slice(0, 20);
+  }
+
+  return "";
+};
+
+const formatAttachmentSummary = (attachment) => {
+  const sizeInKb = Math.max(1, Math.round((attachment.size || 0) / 1024));
+  const dimensions =
+    attachment.width && attachment.height ? `，尺寸 ${attachment.width}x${attachment.height}` : "";
+
+  return `${attachment.name}（${sizeInKb}KB${dimensions}）`;
+};
+
+const buildApiMessage = (message) => {
+  const text = getMessageText(message);
+  const attachments = Array.isArray(message?.attachments) ? message.attachments : [];
+
+  if (!attachments.length) {
+    return {
+      role: message.role,
+      content: text
+    };
+  }
+
+  const attachmentBlock = attachments
+    .map((attachment) => `[用户上传图片：${formatAttachmentSummary(attachment)}]`)
+    .join("\n");
+
+  return {
+    role: message.role,
+    content: text ? `${text}\n\n${attachmentBlock}` : attachmentBlock
+  };
+};
+
+const readFileAsDataUrl = (file) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error("读取图片失败"));
+    reader.readAsDataURL(file);
+  });
+
+const loadImage = (src) =>
+  new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("解析图片失败"));
+    image.src = src;
+  });
+
+const compressImage = async (file) => {
+  const source = await readFileAsDataUrl(file);
+  const image = await loadImage(source);
+
+  const ratio = Math.min(1, MAX_IMAGE_DIMENSION / Math.max(image.width, image.height));
+  const width = Math.max(1, Math.round(image.width * ratio));
+  const height = Math.max(1, Math.round(image.height * ratio));
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+
+  const context = canvas.getContext("2d");
+  if (!context) {
+    throw new Error("浏览器不支持图片处理");
+  }
+
+  context.drawImage(image, 0, 0, width, height);
+
+  return {
+    id: `image-${Date.now()}`,
+    name: file.name,
+    type: "image/jpeg",
+    size: file.size,
+    width,
+    height,
+    previewUrl: canvas.toDataURL("image/jpeg", COMPRESSED_IMAGE_QUALITY)
+  };
+};
+
 const ContextProvider = (props) => {
   const [input, setInput] = useState("");
-  const [recentPrompt, setRecentPrompt] = useState('');
-  // 懒初始化：首次渲染从 localStorage 恢复会话列表
+  const [recentPrompt, setRecentPrompt] = useState("");
   const [sessions, setSessions] = useState(() => {
     try {
-      const saved = localStorage.getItem('dream-chat-sessions');
+      const saved = localStorage.getItem("dream-chat-sessions");
       return saved ? JSON.parse(saved) : [];
     } catch {
       return [];
@@ -20,8 +112,8 @@ const ContextProvider = (props) => {
   });
   const [currentSessionId, setCurrentSessionId] = useState(() => {
     try {
-      return localStorage.getItem('dream-chat-current-session-id')
-        ? Number(localStorage.getItem('dream-chat-current-session-id'))
+      return localStorage.getItem("dream-chat-current-session-id")
+        ? Number(localStorage.getItem("dream-chat-current-session-id"))
         : null;
     } catch {
       return null;
@@ -29,32 +121,36 @@ const ContextProvider = (props) => {
   });
   const [showResult, setShowResult] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [resultData, setResultData] = useState('');
+  const [resultData, setResultData] = useState("");
   const [messages, setMessages] = useState([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [voiceSearch, setVoiceSearch] = useState(false);
   const [recognition, setRecognition] = useState(null);
   const [recordingAnimation, setRecordingAnimation] = useState(false);
+  const [pendingImage, setPendingImage] = useState(null);
 
   const chatContainerRef = useRef(null);
   const isUserScrollingRef = useRef(false);
   const scrollTimeoutRef = useRef(null);
-  // 用于在 onSent 闭包内访问最新 currentSessionId
   const currentSessionIdRef = useRef(currentSessionId);
-  useEffect(() => { currentSessionIdRef.current = currentSessionId; }, [currentSessionId]);
+
+  useEffect(() => {
+    currentSessionIdRef.current = currentSessionId;
+  }, [currentSessionId]);
 
   const createNewSession = useCallback(() => {
     const newSession = {
       id: Date.now(),
-      title: 'New Chat',
+      title: "New Chat",
       messages: [],
       createdAt: new Date().toISOString(),
       showResult: false,
-      resultData: '',
+      resultData: "",
       isGenerating: false,
-      input: ''
+      input: ""
     };
-    setSessions(prev => [newSession, ...prev]);
+
+    setSessions((prev) => [newSession, ...prev]);
     setCurrentSessionId(newSession.id);
     setMessages([]);
     setShowResult(false);
@@ -62,87 +158,103 @@ const ContextProvider = (props) => {
     setInput("");
     setLoading(false);
     setIsGenerating(false);
+    setPendingImage(null);
   }, []);
 
-  const loadSession = useCallback((sessionId) => {
-    const session = sessions.find(s => s.id === sessionId);
-    if (session) {
+  const loadSession = useCallback(
+    (sessionId) => {
+      const session = sessions.find((item) => item.id === sessionId);
+      if (!session) return;
+
       setCurrentSessionId(sessionId);
       setMessages(session.messages);
       setShowResult(session.showResult !== undefined ? session.showResult : session.messages.length > 0);
       setRecentPrompt(session.title);
-      setResultData(session.resultData || '');
+      setResultData(session.resultData || "");
       setIsGenerating(session.isGenerating || false);
-      setInput(session.input || '');
-    }
-  }, [sessions]);
+      setInput(session.input || "");
+      setPendingImage(null);
+    },
+    [sessions]
+  );
 
-  const deleteSession = useCallback((sessionId) => {
-    setSessions(prev => {
-      const updatedSessions = prev.filter(s => s.id !== sessionId);
-      if (currentSessionId === sessionId) {
-        if (updatedSessions.length > 0) {
-          setTimeout(() => loadSession(updatedSessions[0].id), 0);
-        } else {
-          setTimeout(() => createNewSession(), 0);
+  const deleteSession = useCallback(
+    (sessionId) => {
+      setSessions((prev) => {
+        const updatedSessions = prev.filter((session) => session.id !== sessionId);
+
+        if (currentSessionId === sessionId) {
+          if (updatedSessions.length > 0) {
+            setTimeout(() => loadSession(updatedSessions[0].id), 0);
+          } else {
+            setTimeout(() => createNewSession(), 0);
+          }
         }
-      }
-      return updatedSessions;
-    });
-  }, [currentSessionId, loadSession, createNewSession]);
+
+        return updatedSessions;
+      });
+    },
+    [currentSessionId, loadSession, createNewSession]
+  );
 
   const updateSessionMessages = useCallback((newMessages, additionalState = {}) => {
-    setSessions(prev => prev.map(session =>
-      session.id === currentSessionIdRef.current
-        ? {
-            ...session,
-            messages: newMessages,
-            title: newMessages.find(m => m.role === 'user')?.content?.slice(0, 20) || 'New Chat',
-            showResult: additionalState.showResult !== undefined ? additionalState.showResult : session.showResult,
-            resultData: additionalState.resultData !== undefined ? additionalState.resultData : session.resultData,
-            isGenerating: additionalState.isGenerating !== undefined ? additionalState.isGenerating : session.isGenerating,
-            input: additionalState.input !== undefined ? additionalState.input : session.input
-          }
-        : session
-    ));
+    setSessions((prev) =>
+      prev.map((session) =>
+        session.id === currentSessionIdRef.current
+          ? {
+              ...session,
+              messages: newMessages,
+              title: getMessageTitle(newMessages.find((message) => message.role === "user")) || "New Chat",
+              showResult:
+                additionalState.showResult !== undefined ? additionalState.showResult : session.showResult,
+              resultData:
+                additionalState.resultData !== undefined ? additionalState.resultData : session.resultData,
+              isGenerating:
+                additionalState.isGenerating !== undefined ? additionalState.isGenerating : session.isGenerating,
+              input: additionalState.input !== undefined ? additionalState.input : session.input
+            }
+          : session
+      )
+    );
   }, []);
 
   useEffect(() => {
     if (sessions.length === 0) {
       createNewSession();
-    } else if (currentSessionId) {
-      // 刷新后恢复上次打开的会话
-      const session = sessions.find(s => s.id === currentSessionId);
-      if (session) {
-        setMessages(session.messages);
-        setShowResult(session.messages.length > 0);
-        setResultData(session.resultData || '');
-        setInput(session.input || '');
-      }
+      return;
     }
-  }, []); // 仅首次挂载执行
 
-  // sessions 变化时持久化到 localStorage
-  // 生成中的消息状态重置为 completed，防止刷新后永远卡在 generating
+    if (!currentSessionId) return;
+
+    const session = sessions.find((item) => item.id === currentSessionId);
+    if (!session) return;
+
+    setMessages(session.messages);
+    setShowResult(session.messages.length > 0);
+    setResultData(session.resultData || "");
+    setInput(session.input || "");
+    setPendingImage(null);
+  }, []);
+
   useEffect(() => {
     try {
-      const toSave = sessions.map(session => ({
+      const toSave = sessions.map((session) => ({
         ...session,
         isGenerating: false,
-        messages: session.messages.map(msg =>
-          msg.status === 'generating' ? { ...msg, status: 'completed' } : msg
+        messages: session.messages.map((message) =>
+          message.status === "generating" ? { ...message, status: "completed" } : message
         )
       }));
-      localStorage.setItem('dream-chat-sessions', JSON.stringify(toSave));
-    } catch (e) {
-      console.warn('localStorage 写入失败（可能已满）:', e);
+
+      localStorage.setItem("dream-chat-sessions", JSON.stringify(toSave));
+    } catch (error) {
+      console.warn("localStorage 写入失败:", error);
     }
   }, [sessions]);
 
-  // currentSessionId 变化时持久化
   useEffect(() => {
     if (currentSessionId !== null) {
-      localStorage.setItem('dream-chat-current-session-id', String(currentSessionId));
+      localStorage.setItem("dream-chat-current-session-id", String(currentSessionId));
     }
   }, [currentSessionId]);
 
@@ -153,24 +265,231 @@ const ContextProvider = (props) => {
   }, []);
 
   const handleScroll = () => {
-    if (chatContainerRef.current) {
-      const { scrollTop, scrollHeight, clientHeight } = chatContainerRef.current;
-      const isAtBottom = scrollHeight - scrollTop - clientHeight < 100;
-      isUserScrollingRef.current = !isAtBottom;
-      if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
-      scrollTimeoutRef.current = setTimeout(() => {
-        isUserScrollingRef.current = false;
-      }, 1000);
+    if (!chatContainerRef.current) return;
+
+    const { scrollTop, scrollHeight, clientHeight } = chatContainerRef.current;
+    const isAtBottom = scrollHeight - scrollTop - clientHeight < 100;
+    isUserScrollingRef.current = !isAtBottom;
+
+    if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+    scrollTimeoutRef.current = setTimeout(() => {
+      isUserScrollingRef.current = false;
+    }, 1000);
+  };
+
+  const clearPendingImage = useCallback(() => {
+    setPendingImage(null);
+  }, []);
+
+  const handleImageUpload = useCallback(async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      window.alert("只能上传图片文件");
+      return;
+    }
+
+    if (file.size > MAX_IMAGE_FILE_SIZE) {
+      window.alert("图片不能超过 10MB");
+      return;
+    }
+
+    try {
+      const attachment = await compressImage(file);
+      setPendingImage(attachment);
+    } catch (error) {
+      console.error("Image upload error:", error);
+      window.alert(error.message || "图片处理失败");
+    }
+  }, []);
+
+  const runStreamLoop = useCallback(
+    async (apiMessages, aiMessage, allMessages, setMsgs, fsm) => {
+      let fullContent = "";
+      const ctx = { apiMessages, allMessages, aiMessage, aborted: false };
+      let toolsEnabled = true;
+
+      const finalize = (status) => {
+        const finalMessages = ctx.allMessages.map((message) =>
+          message.id === ctx.aiMessage.id
+            ? { ...message, status, content: fullContent, fsmState: status, toolCalls: message.toolCalls }
+            : message
+        );
+
+        setMsgs(finalMessages);
+        updateSessionMessages(finalMessages, { resultData: fullContent, isGenerating: false });
+        setIsGenerating(false);
+        setResultData(fullContent);
+      };
+
+      while (true) {
+        fsm.dispatch("SEND");
+
+        await new Promise((resolve, reject) => {
+          streamParser.fetchStream(
+            ctx.apiMessages,
+            (chunk) => {
+              fsm.dispatch("TEXT_DELTA");
+              fullContent += chunk;
+
+              const updated = ctx.allMessages.map((message) =>
+                message.id === ctx.aiMessage.id
+                  ? { ...message, content: fullContent, fsmState: fsm.getState() }
+                  : message
+              );
+
+              ctx.allMessages = updated;
+              setMsgs(updated);
+              updateSessionMessages(updated, { resultData: fullContent });
+              scrollToBottom();
+            },
+            (error) => {
+              console.error("Stream error:", error);
+
+              if (toolsEnabled && fullContent === "") {
+                console.warn("[FSM] Disable tools and retry");
+                toolsEnabled = false;
+                fsm.state = "idle";
+                resolve({ done: false });
+              } else {
+                fsm.dispatch("ERROR");
+                finalize("failed");
+                reject(error);
+              }
+            },
+            () => {
+              fsm.dispatch("DONE");
+              finalize("completed");
+              resolve({ done: true });
+            },
+            async (toolCalls) => {
+              try {
+                fsm.dispatch("TOOL_DELTA");
+
+                const withTool = ctx.allMessages.map((message) =>
+                  message.id === ctx.aiMessage.id
+                    ? { ...message, fsmState: "tool_calling", toolCalls }
+                    : message
+                );
+
+                ctx.allMessages = withTool;
+                setMsgs(withTool);
+                updateSessionMessages(withTool);
+                scrollToBottom();
+
+                ctx.apiMessages = [
+                  ...ctx.apiMessages,
+                  { role: "assistant", content: fullContent || null, tool_calls: toolCalls }
+                ];
+
+                const toolResultMessages = await executeToolCalls(toolCalls);
+                ctx.apiMessages = [...ctx.apiMessages, ...toolResultMessages];
+
+                const withResults = ctx.allMessages.map((message) =>
+                  message.id === ctx.aiMessage.id
+                    ? { ...message, toolResults: toolResultMessages }
+                    : message
+                );
+
+                ctx.allMessages = withResults;
+                setMsgs(withResults);
+                updateSessionMessages(withResults);
+
+                fsm.dispatch("TOOL_DONE");
+                fullContent = "";
+                resolve({ done: false });
+              } catch (error) {
+                console.error("Tool execution error:", error);
+                fsm.dispatch("ERROR");
+                finalize("failed");
+                reject(error);
+              }
+            },
+            toolsEnabled ? toolDefinitions : null
+          );
+        })
+          .then((result) => {
+            if (result.done) ctx.aborted = true;
+          })
+          .catch(() => {
+            ctx.aborted = true;
+          });
+
+        if (ctx.aborted) break;
+      }
+    },
+    [scrollToBottom, updateSessionMessages]
+  );
+
+  const onSent = async (prompt) => {
+    if (isGenerating) return;
+
+    const messageText = prompt !== undefined ? prompt : input;
+    const trimmedMessage = messageText.trim();
+    const attachments = pendingImage ? [pendingImage] : [];
+
+    if (!trimmedMessage && attachments.length === 0) return;
+
+    const userMessage = {
+      id: Date.now(),
+      role: "user",
+      content: trimmedMessage,
+      attachments,
+      timestamp: new Date().toLocaleString()
+    };
+
+    const newMessages = [...messages, userMessage];
+    setMessages(newMessages);
+    updateSessionMessages(newMessages, { showResult: true, isGenerating: true, input: "" });
+    setInput("");
+    setPendingImage(null);
+    setShowResult(true);
+    setIsGenerating(true);
+    setRecentPrompt(trimmedMessage || attachments[0]?.name || "");
+
+    const aiMessage = {
+      id: Date.now() + 1,
+      role: "assistant",
+      content: "",
+      timestamp: new Date().toLocaleString(),
+      status: "generating",
+      fsmState: "thinking"
+    };
+
+    const messagesWithAI = [...newMessages, aiMessage];
+    setMessages(messagesWithAI);
+
+    const fsm = new MessageFSM((prev, next) => {
+      console.log(`[FSM] ${prev} -> ${next}`);
+    });
+    fsm.state = "idle";
+
+    const apiMessages = newMessages.map(buildApiMessage);
+
+    try {
+      await runStreamLoop(apiMessages, aiMessage, messagesWithAI, setMessages, fsm);
+    } catch {
+      // Errors are handled inside runStreamLoop.
     }
   };
 
   useEffect(() => {
-    const rec = new window.webkitSpeechRecognition();
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      console.warn("当前浏览器不支持语音识别，请使用 Chrome");
+      return;
+    }
+
+    const rec = new SpeechRecognition();
+    rec.lang = "zh-CN";
     rec.onresult = (event) => {
       const transcript = event.results[0][0].transcript;
       setVoiceSearch(false);
       setInput(transcript);
-      onSent(transcript);
+      void onSent(transcript);
       setInput("");
       setRecordingAnimation(false);
     };
@@ -178,246 +497,81 @@ const ContextProvider = (props) => {
       setVoiceSearch(false);
       setRecordingAnimation(false);
     };
+    rec.onerror = (event) => {
+      console.error("语音识别错误:", event.error);
+      setVoiceSearch(false);
+      setRecordingAnimation(false);
+    };
+
     setRecognition(rec);
   }, []);
 
   const openVoiceSearch = () => {
-    if (!voiceSearch) {
+    if (!voiceSearch && recognition) {
       recognition.start();
       setVoiceSearch(true);
       setRecordingAnimation(true);
     }
   };
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  //  核心：带 FSM + Tool Calling 的流式请求循环
-  // ─────────────────────────────────────────────────────────────────────────────
+  const regenerateMessage = useCallback(
+    async (messageIndex) => {
+      if (isGenerating) return;
 
-  /**
-   * 运行一轮 AI 请求（可能触发多次 tool_calls 循环）
-   *
-   * @param {Array}    apiMessages   发给 API 的完整消息历史
-   * @param {object}   aiMessage     UI 中对应的 assistant 消息对象（用于 id 匹配）
-   * @param {Array}    allMessages   当前 UI 消息数组（含 user + aiMessage）
-   * @param {Function} setMsgs       React setState 引用（避免闭包陈旧）
-   * @param {object}   fsm           MessageFSM 实例
-   */
-  const runStreamLoop = useCallback(async (apiMessages, aiMessage, allMessages, setMsgs, fsm) => {
-    let fullContent = '';
-    const ctx = { apiMessages, allMessages, aiMessage, aborted: false };
-    let toolsEnabled = true;
+      const userMessage = messages[messageIndex - 1];
+      if (!userMessage || userMessage.role !== "user") return;
 
-    const finalize = (status) => {
-      const finalMessages = ctx.allMessages.map(msg =>
-        msg.id === ctx.aiMessage.id
-          ? { ...msg, status, content: fullContent, fsmState: status, toolCalls: msg.toolCalls }
-          : msg
-      );
-      setMsgs(finalMessages);
-      updateSessionMessages(finalMessages, { resultData: fullContent, isGenerating: false });
-      setIsGenerating(false);
-      setResultData(fullContent);
-    };
+      const truncatedMessages = messages.slice(0, messageIndex);
+      setMessages(truncatedMessages);
+      updateSessionMessages(truncatedMessages, { isGenerating: true, showResult: true });
+      setIsGenerating(true);
 
-    while (true) {
-      fsm.dispatch('SEND');
+      const aiMessage = {
+        id: Date.now(),
+        role: "assistant",
+        content: "",
+        timestamp: new Date().toLocaleString(),
+        status: "generating",
+        fsmState: "thinking"
+      };
 
-      await new Promise((resolve, reject) => {
-        streamParser.fetchStream(
-          ctx.apiMessages,
-          (chunk) => {
-            fsm.dispatch('TEXT_DELTA');
-            fullContent += chunk;
-            const updated = ctx.allMessages.map(msg =>
-              msg.id === ctx.aiMessage.id
-                ? { ...msg, content: fullContent, fsmState: fsm.getState() }
-                : msg
-            );
-            ctx.allMessages = updated;
-            setMsgs(updated);
-            updateSessionMessages(updated, { resultData: fullContent });
-            scrollToBottom();
-          },
-          (error) => {
-            console.error('Stream error:', error);
-            // 没收到任何内容时自动降级（模型不支持 tools）
-            if (toolsEnabled && fullContent === '') {
-              console.warn('[FSM] 降级为不带 tools 重试');
-              toolsEnabled = false;
-              fsm.state = 'idle';
-              resolve({ done: false });
-            } else {
-              fsm.dispatch('ERROR');
-              finalize('failed');
-              reject(error);
-            }
-          },
-          () => {
-            fsm.dispatch('DONE');
-            finalize('completed');
-            resolve({ done: true });
-          },
-          async (toolCalls) => {
-            try {
-              fsm.dispatch('TOOL_DELTA');
-              const withTool = ctx.allMessages.map(msg =>
-                msg.id === ctx.aiMessage.id
-                  ? { ...msg, fsmState: 'tool_calling', toolCalls }
-                  : msg
-              );
-              ctx.allMessages = withTool;
-              setMsgs(withTool);
-              updateSessionMessages(withTool);
-              scrollToBottom();
+      const messagesWithAI = [...truncatedMessages, aiMessage];
+      setMessages(messagesWithAI);
 
-              ctx.apiMessages = [
-                ...ctx.apiMessages,
-                { role: 'assistant', content: fullContent || null, tool_calls: toolCalls }
-              ];
-
-              const toolResultMessages = await executeToolCalls(toolCalls);
-              ctx.apiMessages = [...ctx.apiMessages, ...toolResultMessages];
-
-              const withResults = ctx.allMessages.map(msg =>
-                msg.id === ctx.aiMessage.id
-                  ? { ...msg, toolResults: toolResultMessages }
-                  : msg
-              );
-              ctx.allMessages = withResults;
-              setMsgs(withResults);
-              updateSessionMessages(withResults);
-
-              fsm.dispatch('TOOL_DONE');
-              fullContent = '';
-              resolve({ done: false });
-            } catch (e) {
-              console.error('Tool execution error:', e);
-              fsm.dispatch('ERROR');
-              finalize('failed');
-              reject(e);
-            }
-          },
-          toolsEnabled ? toolDefinitions : null
-        );
-      }).then(result => {
-        if (result.done) ctx.aborted = true;
-      }).catch(() => {
-        ctx.aborted = true;
+      const fsm = new MessageFSM((prev, next) => {
+        console.log(`[FSM] ${prev} -> ${next}`);
       });
+      fsm.state = "idle";
 
-      if (ctx.aborted) break;
-    }
-  }, [updateSessionMessages, scrollToBottom]);
+      const apiMessages = truncatedMessages.map(buildApiMessage);
 
-  // ─────────────────────────────────────────────────────────────────────────────
-
-  const onSent = async (prompt) => {
-    if (isGenerating) return;
-
-    const messageText = prompt !== undefined ? prompt : input;
-    if (!messageText.trim()) return;
-
-    const userMessage = {
-      id: Date.now(),
-      role: 'user',
-      content: messageText.trim(),
-      timestamp: new Date().toLocaleString()
-    };
-
-    const newMessages = [...messages, userMessage];
-    setMessages(newMessages);
-    updateSessionMessages(newMessages, { showResult: true, isGenerating: true, input: '' });
-    setInput("");
-    setShowResult(true);
-    setIsGenerating(true);
-    setRecentPrompt(messageText);
-
-    const aiMessage = {
-      id: Date.now() + 1,
-      role: 'assistant',
-      content: '',
-      timestamp: new Date().toLocaleString(),
-      status: 'generating',
-      fsmState: 'thinking'
-    };
-
-    const messagesWithAI = [...newMessages, aiMessage];
-    setMessages(messagesWithAI);
-
-    const fsm = new MessageFSM((prev, next) => {
-      console.log(`[FSM] ${prev} → ${next}`);
-    });
-    // FSM 初始在 idle，runStreamLoop 内 dispatch('SEND') 会推到 thinking
-    fsm.state = 'idle';
-
-    const apiMessages = newMessages.map(msg => ({
-      role: msg.role,
-      content: msg.content
-    }));
-
-    try {
-      await runStreamLoop(apiMessages, aiMessage, messagesWithAI, setMessages, fsm);
-    } catch {
-      // 错误已在 runStreamLoop 内处理
-    }
-  };
-
-  const regenerateMessage = useCallback(async (messageIndex) => {
-    if (isGenerating) return;
-
-    const userMessage = messages[messageIndex - 1];
-    if (!userMessage || userMessage.role !== 'user') return;
-
-    const truncatedMessages = messages.slice(0, messageIndex);
-    setMessages(truncatedMessages);
-    updateSessionMessages(truncatedMessages, { isGenerating: true, showResult: true });
-    setIsGenerating(true);
-
-    const aiMessage = {
-      id: Date.now(),
-      role: 'assistant',
-      content: '',
-      timestamp: new Date().toLocaleString(),
-      status: 'generating',
-      fsmState: 'thinking'
-    };
-
-    const messagesWithAI = [...truncatedMessages, aiMessage];
-    setMessages(messagesWithAI);
-
-    const fsm = new MessageFSM((prev, next) => {
-      console.log(`[FSM] ${prev} → ${next}`);
-    });
-    fsm.state = 'idle';
-
-    const apiMessages = truncatedMessages.map(msg => ({
-      role: msg.role,
-      content: msg.content
-    }));
-
-    try {
-      await runStreamLoop(apiMessages, aiMessage, messagesWithAI, setMessages, fsm);
-    } catch {
-      // 错误已在 runStreamLoop 内处理
-    }
-  }, [isGenerating, messages, updateSessionMessages, runStreamLoop]);
+      try {
+        await runStreamLoop(apiMessages, aiMessage, messagesWithAI, setMessages, fsm);
+      } catch {
+        // Errors are handled inside runStreamLoop.
+      }
+    },
+    [isGenerating, messages, runStreamLoop, updateSessionMessages]
+  );
 
   const abortGeneration = () => {
     streamParser.abort();
     setIsGenerating(false);
-    const updatedMessages = messages.map(msg =>
-      msg.status === 'generating'
-        ? { ...msg, status: 'aborted', fsmState: 'aborted' }
-        : msg
+
+    const updatedMessages = messages.map((message) =>
+      message.status === "generating"
+        ? { ...message, status: "aborted", fsmState: "aborted" }
+        : message
     );
+
     setMessages(updatedMessages);
     updateSessionMessages(updatedMessages, { isGenerating: false });
   };
 
-  const handleKeyPress = (e) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      onSent();
+  const handleKeyPress = (event) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      void onSent();
     }
   };
 
@@ -440,6 +594,9 @@ const ContextProvider = (props) => {
     openVoiceSearch,
     recordingAnimation,
     setRecordingAnimation,
+    pendingImage,
+    handleImageUpload,
+    clearPendingImage,
     messages,
     isGenerating,
     abortGeneration,
@@ -450,11 +607,7 @@ const ContextProvider = (props) => {
     scrollToBottom
   };
 
-  return (
-    <Context.Provider value={contextValue}>
-      {props.children}
-    </Context.Provider>
-  );
+  return <Context.Provider value={contextValue}>{props.children}</Context.Provider>;
 };
 
 export default ContextProvider;

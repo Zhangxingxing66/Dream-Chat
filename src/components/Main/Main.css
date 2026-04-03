@@ -166,6 +166,57 @@
   gap: 15px;
 }
 
+.search-actions {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+
+.hidden-file-input {
+  display: none;
+}
+
+.pending-upload {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(168, 218, 220, 0.4);
+  border-radius: 24px;
+  box-shadow: 0 3px 14px rgba(168, 218, 220, 0.16);
+}
+
+.pending-upload-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.pending-upload-note {
+  font-size: 12px;
+  color: #7f8c8d;
+  text-align: right;
+}
+
+.remove-upload-btn {
+  border: none;
+  background: rgba(244, 163, 180, 0.14);
+  color: #c75c72;
+  padding: 6px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.2s;
+}
+
+.remove-upload-btn:hover {
+  background: rgba(244, 163, 180, 0.24);
+}
+
 .bottom-info {
   font-size: 13px;
   margin: 15px auto;
@@ -276,6 +327,55 @@
 .message-content p {
   margin: 0;
   white-space: pre-wrap;
+}
+
+.message-attachments {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.attachment-preview {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.65);
+  border: 1px solid rgba(168, 218, 220, 0.35);
+}
+
+.attachment-preview.compact {
+  min-width: 220px;
+}
+
+.attachment-image {
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+  border-radius: 14px;
+  flex-shrink: 0;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+
+.attachment-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.attachment-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #2c3e50;
+  word-break: break-word;
+}
+
+.attachment-dimensions {
+  font-size: 12px;
+  color: #7f8c8d;
 }
 
 .message-content .markdown-content {
@@ -504,6 +604,24 @@
   }
   .search-box div {
     gap: 5px;
+  }
+
+  .pending-upload {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .pending-upload-actions {
+    width: 100%;
+    align-items: flex-start;
+  }
+
+  .pending-upload-note {
+    text-align: left;
+  }
+
+  .message-content {
+    max-width: 82%;
   }
 }
 
@@ -755,4 +873,3 @@
   color: #aab7b8;
   margin-left: 6px;
 }
-
